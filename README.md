@@ -202,6 +202,68 @@ Set inside `StartServer` via `ServerContext.SetCooldown(seconds)`.
 
 ---
 
+## Status Effects
+
+### Defining an effect
+
+```lua
+local Burn = Combat.StatusEffects.Register("Burn")
+
+Burn.OnApplied = function(EntityId, Data)
+    -- Data.Damage, Data.Duration, Data.Stacks are available
+end
+
+Burn.OnTick = function(EntityId, Data, DeltaTime)
+    local HealthData = Combat.Component.GetComponentData(EntityId, Combat.Components.Health)
+    if HealthData then
+        HealthData.Health = math.max(0, HealthData.Health - Data.Damage * DeltaTime)
+    end
+end
+
+Burn.OnRemoved = function(EntityId, Data)
+    -- cleanup
+end
+
+Burn.OnStack = function(EntityId, Data, ApplicationData)
+    -- called instead of the default when the effect is applied while already active
+    -- default (no OnStack): increments Stacks and resets Duration
+    Data.Stacks += 1
+    Data.Damage += ApplicationData.Damage
+end
+```
+
+The tick loop and expiry run **server-side only**. The `StatusEffects` component replicates to clients automatically, so clients can read active effects.
+
+### Applying and removing
+
+```lua
+Combat.StatusEffects.Apply(EntityId, "Burn", { Duration = 5, Damage = 10 })
+Combat.StatusEffects.Remove(EntityId, "Burn")
+Combat.StatusEffects.RemoveAll(EntityId)
+```
+
+`Duration = -1` (or omitted) makes an effect permanent until manually removed.
+
+Applying an already-active effect calls `OnStack` if defined, otherwise increments `Stacks` and resets `Duration`.
+
+### Reading effects
+
+```lua
+Combat.StatusEffects.Has(EntityId, "Burn")         →  boolean
+Combat.StatusEffects.Get(EntityId, "Burn")         →  EffectData?
+```
+
+### EffectData fields
+
+| Field | Type | Description |
+|---|---|---|
+| `Name` | `string` | Effect name |
+| `Duration` | `number` | Remaining seconds (`-1` = permanent) |
+| `Stacks` | `number` | Current stack count |
+| `...` | `any` | Any fields passed in `ApplicationData` |
+
+---
+
 ## Lookup helpers
 
 ```lua
