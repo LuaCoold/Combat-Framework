@@ -136,18 +136,39 @@ end
 ```lua
 local MySkill = Combat.Skills.Create("MySkill")
 
+-- Optional: state control
+MySkill.StunStates    = { "Stunned" }           -- these effects block/cancel the skill
+MySkill.PauseStates   = { "Attacking" }         -- these effects pause and auto-resume the skill
+MySkill.CancelParallel = true                   -- true (default): OnCancelServer + StopServer run in parallel
+                                                -- false: OnCancelServer runs first, then StopServer
+
 MySkill.StartServer = function(ServerContext)
     ServerContext.SetCooldown(3)
-    -- apply effects, deal damage, etc.
-    ServerContext.Message("Hit")   -- send message to client
-    -- ServerContext.Reject()      -- cancel the skill
+    ServerContext.Message("Hit")
+end
+
+MySkill.StopServer = function(ServerContext)
+    ServerContext.Message("Stop")
+end
+
+MySkill.OnCancelServer = function(ServerContext)
+    -- forced interruption (StunState hit, or manual CancelSkill)
+    -- runs alongside StopServer (parallel) or before it (sequential)
 end
 
 MySkill.StartClient = function(ClientContext)
-    -- play animations, sounds, etc.
-    local Hit = ClientContext.MessageAwait("Hit")  -- yields until server sends "Hit"
+    local Hit = ClientContext.MessageAwait("Hit")
     if not Hit then return end
-    -- react to hit
+    ClientContext.MessageAwait("Stop")
+end
+
+MySkill.StopClient = function()
+    -- fires immediately on client key release
+end
+
+MySkill.OnCancelClient = function(IsPaused: boolean)
+    -- IsPaused = true:  a PauseState interrupted — server will auto-resume when it clears
+    -- IsPaused = false: a StunState cancelled — fully stopped
 end
 ```
 
@@ -189,11 +210,26 @@ Combat.Skills.GetCooldownRemaining(EntityId, SlotIndex)  →  number
 
 Set inside `StartServer` via `ServerContext.SetCooldown(seconds)`.
 
+### SkillDefinition fields
+
+| Field | Type | Description |
+|---|---|---|
+| `StunStates` | `{string}?` | Effect names that block start and cancel mid-run |
+| `PauseStates` | `{string}?` | Effect names that pause mid-run and auto-resume when cleared |
+| `CancelParallel` | `boolean?` | `true` (default): `OnCancelServer` + `StopServer` run simultaneously. `false`: sequential |
+| `StartServer` | `func?` | Runs on server when skill starts |
+| `StopServer` | `func?` | Runs on server when skill stops (key release or `StopSkill`) |
+| `OnCancelServer` | `func?` | Runs on server when forcibly interrupted by a stun or pause state |
+| `StartClient` | `func?` | Runs on client when skill starts |
+| `StopClient` | `func?` | Runs immediately on client when key is released |
+| `OnCancelClient(IsPaused)` | `func?` | Runs on client on forced cancel. `IsPaused=true` means the server will auto-resume |
+
 ### ServerContext
 
 | Field | Description |
 |---|---|
 | `EntityId` | The entity the skill is running on |
+| `SlotIndex` | The slot this skill occupies |
 | `Player` | The associated player, if any |
 | `SetCooldown(n)` | Set cooldown to `n` seconds from now |
 | `IncrementCooldown(n)` | Add `n` seconds to the current cooldown |
@@ -285,7 +321,8 @@ PlayerComponent.GetPlayerFromEntityId(EntityId)  →  Player?
 |---|---|---|
 | `SkillAction(slot, 0)` | Client → Server | Client-initiated start |
 | `SkillAction(slot, 1)` | Client → Server | Client-initiated stop |
-| `SkillAction(slot, 2)` | Client → Server | Server-initiated confirm |
-| `SkillStart(slot, name)` | Server → Client | Server requesting client start |
+| `SkillAction(slot, 2)` | Client → Server | Server-initiated confirm (after `SkillStart`) |
+| `SkillStart(slot, name)` | Server → Client | Server requesting client start (also used for pause resume) |
 | `SkillMessage(slot, msg)` | Server → Client | Resumes `MessageAwait` |
-| `SkillReject(slot)` | Server → Client | Cancels skill client-side |
+| `SkillReject(slot)` | Server → Client | Cancels skill — fires `OnCancelClient(false)` |
+| `SkillPause(slot)` | Server → Client | Pauses skill — fires `OnCancelClient(true)`, server will resume |
